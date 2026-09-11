@@ -1,0 +1,19 @@
+﻿Messages loaded: 28594
+
+INTENT COUNTS (from train.jsonl):
+Intent                        Count      %
+---------------------------------------------
+playback_error                 2478   8.7%
+account_login                  1077   3.8%
+premium_subscription           1943   6.8%
+billing_charge                 1613   5.6%
+app_crash_bug                   614   2.1%
+playlist_library               1712   6.0%
+content_unavailable             699   2.4%
+device_platform                2160   7.6%
+offline_download                848   3.0%
+
+Unmatched: 15450 (54.0%)
+
+Saved -> C:\Users\Siddhi\Desktop\Hiver\spotify_agent\docs\intent_taxonomy.md
+DONE.

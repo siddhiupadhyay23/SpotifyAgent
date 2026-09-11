@@ -1,0 +1,14 @@
+{
+  "retrieval_method": "Jaccard token-overlap, top-3, sample=500, no platform filter",
+  "classifier": "TF-IDF + LogisticRegression (from simple_classifier.py)",
+  "generation": "rule-based template (no API key)",
+  "golden_size": 200,
+  "runtime_seconds": 1.8,
+  "intent_accuracy": 0.905,
+  "intent_macro_f1": 0.8925,
+  "intent_weighted_f1": 0.9044,
+  "retrieval_coverage": 0.465,
+  "avg_top1_score": 0.161,
+  "llm_used": false,
+  "note": "LLM generation requires OPENAI_API_KEY env var. Set it and rerun to enable grounded LLM responses. Intent classification and retrieval are unaffected."
+}

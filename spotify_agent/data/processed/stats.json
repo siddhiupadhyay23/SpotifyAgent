@@ -1,0 +1,12 @@
+{
+  "raw_dataset_rows": 2811774,
+  "spotify_outbound": 43265,
+  "spotify_inbound_paired": 41585,
+  "pairs_before_dm_filter": 43092,
+  "dm_only_dropped": 2243,
+  "pairs_after_dm_filter": 40849,
+  "train": 28594,
+  "val": 6127,
+  "test": 6128,
+  "retrieval_corpus": 34721
+}

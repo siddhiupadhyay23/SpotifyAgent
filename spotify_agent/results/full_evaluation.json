@@ -1,0 +1,84 @@
+{
+  "golden_set_size": 200,
+  "intent_classifier": {
+    "model": "TF-IDF (ngram 1-2, max 30k) + LogisticRegression (balanced)",
+    "accuracy": 0.905,
+    "macro_f1": 0.8925,
+    "weighted_f1": 0.9044,
+    "per_intent_f1": {
+      "playback_error": 0.8916,
+      "account_login": 0.9375,
+      "premium_subscription": 0.8929,
+      "billing_charge": 0.96,
+      "app_crash_bug": 0.8,
+      "playlist_library": 0.8846,
+      "content_unavailable": 0.8,
+      "device_platform": 0.9375,
+      "offline_download": 0.9286
+    }
+  },
+  "majority_baseline": {
+    "majority_intent": "playback_error",
+    "accuracy": 0.19,
+    "macro_f1": 0.0355,
+    "weighted_f1": 0.0607
+  },
+  "retrieval_ablation": {
+    "note": "Recall@K not reported: no ground-truth relevance labels exist for the 500-example retrieval sample. Coverage (score>0.15) and platform match are used as proxy quality signals.",
+    "jaccard": {
+      "coverage_gt15": 0.53,
+      "avg_top1_score": 0.1761,
+      "platform_match_rate": 0.5814
+    },
+    "hybrid": {
+      "coverage_gt15": 0.57,
+      "avg_top1_score": 0.1782,
+      "platform_match_rate": 0.4884
+    }
+  },
+  "final_agent": {
+    "accuracy": 0.905,
+    "macro_f1": 0.8925,
+    "weighted_f1": 0.9044,
+    "per_intent_f1": {
+      "playback_error": 0.8916,
+      "account_login": 0.9375,
+      "premium_subscription": 0.8929,
+      "billing_charge": 0.96,
+      "app_crash_bug": 0.8,
+      "playlist_library": 0.8846,
+      "content_unavailable": 0.8,
+      "device_platform": 0.9375,
+      "offline_download": 0.9286
+    },
+    "escalation": {
+      "true_escalate_count": 30,
+      "pred_escalate_count": 84,
+      "escalation_rate": 0.42,
+      "precision": 0.3214,
+      "recall": 0.9,
+      "f1": 0.4737,
+      "false_auto_handle": 3,
+      "false_auto_handle_rate": 0.1
+    },
+    "retrieval_coverage_gt15": 0.57,
+    "avg_top1_score": 0.1782,
+    "platform_accuracy": 0.6977,
+    "generation_modes": {
+      "template_fallback:intent": 107,
+      "template_fallback:top_evidence": 73,
+      "escalation_override": 20
+    },
+    "llm_response_quality": "NOT EVALUATED \u2014 no OPENAI_API_KEY set"
+  },
+  "limitations": [
+    "Golden set size = 200; per-intent estimates for rare classes (n<15) have high variance.",
+    "Retrieval corpus capped at 500 examples (sample from train.jsonl). Full corpus = 34,721 pairs.",
+    "No OPENAI_API_KEY: generation uses template fallback, not grounded LLM responses.",
+    "Response quality not evaluated (requires LLM judge or human annotation).",
+    "Intent labels in golden set are keyword-derived (automated), not human-annotated.",
+    "Recall@K not reported: no ground-truth relevance labels exist for retrieval pairs.",
+    "Escalation labels in golden set derived from keyword rules + high-risk intent heuristic, not human judgment.",
+    "Dataset spans 2013-2017; Spotify product/pricing has changed significantly since."
+  ]
+}

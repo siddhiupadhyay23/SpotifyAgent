@@ -1,0 +1,119 @@
+{
+  "playback_error": {
+    "label": "Playback Error",
+    "definition": "Customer cannot play music: buffering, song won't start, skipping, pausing unexpectedly.",
+    "train_count": 2338,
+    "train_pct": 8.18,
+    "examples": [
+      "@SpotifyCares Feature suggestion: ability to stream to @44842 from the PC app.",
+      "@SpotifyCares I need help! The app keeps creating new playlists labelled \"tracks\" with only one song in each one. How do I stop this?",
+      "@SpotifyCares Could you get someone to read thru the comments at that link (4 pgs!)? User accidentally disliking a song and no way to reverse it. Sucks!"
+    ],
+    "nearest_confusable": "app_crash_bug",
+    "escalation": "AUTO_HANDLE — troubleshoot first; ESCALATE only if persists >24h"
+  },
+  "account_login": {
+    "label": "Account / Login",
+    "definition": "Cannot access account: login failures, password reset, locked account.",
+    "train_count": 1185,
+    "train_pct": 4.14,
+    "examples": [
+      "@SpotifyCares Y'all having a server error? I can't use the browser version right now. Keeps redirecting me to the login page.",
+      "@SpotifyCares Haha sure, hopefully I remember my password or you may never see me again",
+      "@115888 us independent Artists are having issues to log in and check our stats. Green button not working on log in page. Thanks"
+    ],
+    "nearest_confusable": "premium_subscription",
+    "escalation": "ESCALATE if hack/security signal; AUTO_HANDLE for password reset"
+  },
+  "premium_subscription": {
+    "label": "Premium / Subscription",
+    "definition": "Questions about premium plan status, cancellation, trials, plan types.",
+    "train_count": 2137,
+    "train_pct": 7.47,
+    "examples": [
+      "@SpotifyCares i love spotify but spotify premium costs too much",
+      "wtf is this @115888? Why is there a song limit on premium? I guess I can't add anymore songs :-( https://t.co/M5N1nFsM3Y",
+      "@3493 @SpotifyCares expand the student premium version to CAD? sincerely, a broke college student who had to cancel her plan today😶"
+    ],
+    "nearest_confusable": "billing_charge",
+    "escalation": "AUTO_HANDLE for status queries; ESCALATE if charge dispute"
+  },
+  "billing_charge": {
+    "label": "Billing / Charge",
+    "definition": "Unexpected charges, payment failures, refund requests.",
+    "train_count": 1213,
+    "train_pct": 4.24,
+    "examples": [
+      "@115888 What about military members? We make basically no money.",
+      "@115888 I were charges for premium but my account still free. student price. https://t.co/SphQBcG7B5",
+      "@SpotifyCares \nStill waiting for PayPal payment option on the student subscription. Way to go Spotify :eyeroll:"
+    ],
+    "nearest_confusable": "premium_subscription",
+    "escalation": "ESCALATE for disputes / unauthorized charges"
+  },
+  "app_crash_bug": {
+    "label": "App Crash / Bug",
+    "definition": "App crashes, freezes, won't open, black screen.",
+    "train_count": 559,
+    "train_pct": 1.95,
+    "examples": [
+      "@SpotifyCares Where do I report broken songs (static over parts of it)? I have several",
+      "Update your app @115888-- experiencing a crash bug every single time I load up the app and look up @37632.",
+      "@SpotifyCares the 'Discovered on' playlist feature has vanished off the Artist about page, is this a bug or has it moved and I can't find it"
+    ],
+    "nearest_confusable": "playback_error",
+    "escalation": "AUTO_HANDLE with reinstall/update steps"
+  },
+  "playlist_library": {
+    "label": "Playlist / Library",
+    "definition": "Playlists or saved songs missing, deleted, or not syncing.",
+    "train_count": 2441,
+    "train_pct": 8.54,
+    "examples": [
+      "@SpotifyCares several songs from album spotify:album:3f3kWND9tvmfI3UEsYH4yc including these: https://t.co/DCe6OzpXqj",
+      "@SpotifyCares hello hi i'd like to ask why the nxworries album 'yes lawd' is not on spotify anymore",
+      "@115888 in the new web app style I cannot find the option for ordering albums by \"most recent added\" (=added into my library)"
+    ],
+    "nearest_confusable": "account_login",
+    "escalation": "AUTO_HANDLE with re-login/sync; ESCALATE if confirmed data loss"
+  },
+  "content_unavailable": {
+    "label": "Content Unavailable",
+    "definition": "Songs/albums/artists unavailable: regional restrictions, content removal.",
+    "train_count": 642,
+    "train_pct": 2.25,
+    "examples": [
+      "@SpotifyCares before I already asked about if there's option to turn off the new interface and use the old one? Just can't find anything now",
+      "@SpotifyCares For example in playlists I no longer see/identify the songs that were saved before. UI is too large, hard to navigate and find new music.",
+      "@SpotifyCares Using it on the web.Playlists only show list of songs without checkmarks for saved songs. Also a radio tab no longer shows previous sessions"
+    ],
+    "nearest_confusable": "playlist_library",
+    "escalation": "AUTO_HANDLE — licensing restrictions cannot be overridden"
+  },
+  "device_platform": {
+    "label": "Device / Platform",
+    "definition": "Spotify not working on a specific device: speaker, TV, console, car.",
+    "train_count": 2373,
+    "train_pct": 8.3,
+    "examples": [
+      "@spotifycares my amazon echo wont connect to spotify, please help",
+      "@SpotifyCares Spotify version 8.4.3.844 \niPhone 6 iOS 9.3.3",
+      "@SpotifyCares Android version?"
+    ],
+    "nearest_confusable": "app_crash_bug",
+    "escalation": "AUTO_HANDLE with device-specific troubleshooting"
+  },
+  "offline_download": {
+    "label": "Offline / Download",
+    "definition": "Downloaded songs not available offline, download failures.",
+    "train_count": 822,
+    "train_pct": 2.87,
+    "examples": [
+      "@SpotifyCares @112253   it says not available in offline mode ... its never done this before",
+      "Hey @115888/@13281 why has offline scrobbling not been implemented yet? /cc @SpotifyCares",
+      "@SpotifyCares Hi - all my offline tracks (everything in my 'songs') keep greying out. Happening like 2/3 times a month. Is there a fix?"
+    ],
+    "nearest_confusable": "playback_error",
+    "escalation": "AUTO_HANDLE; ESCALATE if premium active but offline fails"
+  }
+}

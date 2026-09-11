@@ -1,0 +1,18 @@
+{
+  "majority_intent": "playback_error",
+  "golden_size": 200,
+  "accuracy": 0.19,
+  "macro_f1": 0.0355,
+  "weighted_f1": 0.0607,
+  "train_intent_counts": {
+    "playback_error": 2478,
+    "device_platform": 2160,
+    "premium_subscription": 1943,
+    "playlist_library": 1712,
+    "billing_charge": 1613,
+    "account_login": 1077,
+    "offline_download": 848,
+    "content_unavailable": 699,
+    "app_crash_bug": 614
+  }
+}

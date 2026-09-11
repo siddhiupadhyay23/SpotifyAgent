@@ -1,0 +1,49 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  *, *::before, *::after { box-sizing: border-box; }
+  html { -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
+  body { margin: 0; background: #fafaf9; color: #111110; font-family: 'Inter', system-ui, sans-serif; }
+
+  /* Light scrollbar for paper sections */
+  ::-webkit-scrollbar        { width: 4px; height: 4px; }
+  ::-webkit-scrollbar-track  { background: transparent; }
+  ::-webkit-scrollbar-thumb  { background: #d4d0c8; border-radius: 99px; }
+
+  /* Dark scrollbar for app sections */
+  .dark-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+  }
+}
+
+@layer utilities {
+  .text-balance { text-wrap: balance; }
+
+  /* Gradient text */
+  .text-gradient-blue {
+    background: linear-gradient(135deg, #60a5fa 0%, #3b82f6 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  /* Glass surface for dark contexts */
+  .glass {
+    background: rgba(17,17,21,0.75);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+  }
+
+  /* Thin top gradient border */
+  .border-top-glow::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(59,130,246,0.4), transparent);
+  }
+}

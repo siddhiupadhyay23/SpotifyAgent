@@ -1,0 +1,33 @@
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Python cache & compiled files
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.coverage
+
+# Environments & secrets
+.env
+.env.*
+.env.local
+!.env.example
+venv/
+.venv/
+env/
+ENV/
+
+# Large datasets & raw files (>100MB)
+twcs/
+twcs.csv
+*.csv.zip
+
+# Caches & OS files
+.cache/
+**/.cache/
+.DS_Store
+Thumbs.db
