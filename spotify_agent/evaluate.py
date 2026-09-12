@@ -4,14 +4,27 @@ Reads only processed files. Does NOT touch the raw 2.8M-row CSV.
 Run: python evaluate.py
 """
 
-import json, sys, time
+import json, sys, time, argparse
 from pathlib import Path
 from collections import Counter
 
-ROOT    = Path(__file__).parent
-GOLDEN  = ROOT / "golden_set" / "golden_set.jsonl"
-RESULTS = ROOT / "results"
+ROOT           = Path(__file__).parent
+GOLDEN_PRIMARY = ROOT / "golden_set" / "final_golden_set.jsonl"
+GOLDEN_SILVER  = ROOT / "golden_set" / "golden_set.jsonl"
+RESULTS        = ROOT / "results"
 RESULTS.mkdir(parents=True, exist_ok=True)
+
+# Parse CLI arguments to support evaluating silver/rule-derived set and --no-llm
+parser = argparse.ArgumentParser(description="Full evaluation harness")
+parser.add_argument("--silver", "--rule-derived", action="store_true",
+                    help="Evaluate on legacy rule-derived silver set instead of primary human-reviewed golden set")
+parser.add_argument("--no-llm", action="store_true",
+                    help="Skip LLM response quality evaluation")
+args, _ = parser.parse_known_args()
+
+use_silver = args.silver or not GOLDEN_PRIMARY.exists()
+GOLDEN = GOLDEN_SILVER if use_silver else GOLDEN_PRIMARY
+is_human_reviewed = not use_silver
 
 sys.path.insert(0, str(ROOT))
 
@@ -32,11 +45,12 @@ with open(GOLDEN, encoding="utf-8") as f:
     for line in f:
         golden.append(json.loads(line))
 N = len(golden)
-print(f"Golden set: {N} examples", flush=True)
+benchmark_name = "human-reviewed primary benchmark" if is_human_reviewed else "rule-derived silver benchmark"
+print(f"Golden set: {N} examples ({benchmark_name} from {GOLDEN.name})", flush=True)
 
-messages     = [g["customer_msg"]    for g in golden]
-true_intents = [g["intent"]          for g in golden]
-true_esc     = [g["escalation_label"] for g in golden]  # ESCALATE / AUTO_HANDLE
+messages     = [g.get("customer_message") or g.get("customer_msg", "") for g in golden]
+true_intents = [g.get("human_intent") or g.get("intent", "") for g in golden]
+true_esc     = [g.get("human_escalation") or g.get("escalation_label", "AUTO_HANDLE") for g in golden]  # ESCALATE / AUTO_HANDLE
 
 # ══════════════════════════════════════════════════════════════════
 # STEP 1 — Intent classifier
@@ -116,17 +130,22 @@ from agent import run as agent_run
 t0 = time.time()
 agent_preds = []
 for i, g in enumerate(golden):
-    r = agent_run(g["customer_msg"])
+    c_msg    = g.get("customer_message") or g.get("customer_msg", "")
+    t_intent = g.get("human_intent") or g.get("intent", "")
+    t_esc    = g.get("human_escalation") or g.get("escalation_label", "AUTO_HANDLE")
+    g_id     = g.get("example_id") or g.get("golden_id", f"g{i+1:04d}")
+
+    r = agent_run(c_msg)
     agent_preds.append({
-        "golden_id":        g["golden_id"],
-        "customer_msg":     g["customer_msg"],
-        "true_intent":      g["intent"],
+        "golden_id":        g_id,
+        "customer_msg":     c_msg,
+        "true_intent":      t_intent,
         "pred_intent":      r["intent"],
         "intent_confidence":r["intent_confidence"],
         "true_platform":    g.get("platform","unknown"),
         "pred_platform":    r["platform"],
         "risk_signals":     r["risk_signals"],
-        "true_escalation":  g["escalation_label"],
+        "true_escalation":  t_esc,
         "pred_escalation":  r["decision"],
         "escalation_reason":r["escalation_reason"],
         "draft_reply":      r["draft_reply"],
@@ -134,7 +153,7 @@ for i, g in enumerate(golden):
         "top_evidence_score": r["retrieved_evidence"][0]["score"] if r["retrieved_evidence"] else 0,
     })
     if (i+1) % 50 == 0:
-        print(f"  {i+1}/200 ...", flush=True)
+        print(f"  {i+1}/{N} ...", flush=True)
 
 agent_time = time.time() - t0
 print(f"  Done in {agent_time:.1f}s")
@@ -233,7 +252,21 @@ print("="*65)
 # ══════════════════════════════════════════════════════════════════
 print("\n[4/4] Saving ...", flush=True)
 
+full_limitations = [
+    f"Golden set size = {N}; per-intent estimates for rare classes (n<15) have high variance.",
+    "Retrieval corpus capped at 500 examples (sample from train.jsonl). Full corpus = 34,721 pairs.",
+    "No OPENAI_API_KEY: generation uses template fallback, not grounded LLM responses.",
+    "Response quality not evaluated (requires LLM judge or human annotation).",
+    "Recall@K not reported: no ground-truth relevance labels exist for retrieval pairs.",
+    "Dataset spans 2013-2017; Spotify product/pricing has changed significantly since.",
+]
+if not is_human_reviewed:
+    full_limitations.insert(4, "Intent labels in golden set are keyword-derived (automated), not human-annotated.")
+    full_limitations.insert(5, "Escalation labels in golden set derived from keyword rules + high-risk intent heuristic, not human judgment.")
+
 full = {
+    "benchmark":       "human_reviewed" if is_human_reviewed else "rule_derived_silver",
+    "golden_set_file": GOLDEN.name,
     "golden_set_size": N,
     "intent_classifier": {
         "model":       "TF-IDF (ngram 1-2, max 30k) + LogisticRegression (balanced)",
@@ -274,16 +307,7 @@ full = {
         "generation_modes":        dict(gen_modes),
         "llm_response_quality":    "NOT EVALUATED — no OPENAI_API_KEY set",
     },
-    "limitations": [
-        "Golden set size = 200; per-intent estimates for rare classes (n<15) have high variance.",
-        "Retrieval corpus capped at 500 examples (sample from train.jsonl). Full corpus = 34,721 pairs.",
-        "No OPENAI_API_KEY: generation uses template fallback, not grounded LLM responses.",
-        "Response quality not evaluated (requires LLM judge or human annotation).",
-        "Intent labels in golden set are keyword-derived (automated), not human-annotated.",
-        "Recall@K not reported: no ground-truth relevance labels exist for retrieval pairs.",
-        "Escalation labels in golden set derived from keyword rules + high-risk intent heuristic, not human judgment.",
-        "Dataset spans 2013-2017; Spotify product/pricing has changed significantly since.",
-    ],
+    "limitations": full_limitations,
 }
 
 (RESULTS / "full_evaluation.json").write_text(
@@ -298,9 +322,11 @@ per_clf_rows = "\n".join(
     f"| `{i}` | {round(float(s),4):.4f} | {round(float(sa),4):.4f} |"
     for i,s,sa in sorted(zip(INTENTS,per_clf,per_ag), key=lambda x:-x[1]))
 
+esc_note = "> Escalation ground truth verified by human review." if is_human_reviewed else "> Escalation labels are keyword-rule derived. True human escalation judgment may differ."
+
 md = f"""# Full Evaluation — SpotifyCares Support Agent
 
-All results measured on **{N} held-out golden examples** from `golden_set/golden_set.jsonl`.
+All results measured on **{N} held-out golden examples** from `golden_set/{GOLDEN.name}` ({benchmark_name}).
 No raw dataset re-read. No data leakage (golden set from test split, retrieval from train+val).
 
 ---
@@ -349,7 +375,7 @@ and platform match rate by +{(hyb_stats['platform_match_rate']-jac_stats['platfo
 | F1 | {esc_f1:.4f} |
 | False auto-handle rate | {false_auto}/{n_true_esc} ({100*false_auto/max(n_true_esc,1):.1f}%) |
 
-> Escalation labels are keyword-rule derived. True human escalation judgment may differ.
+{esc_note}
 
 ---
 
