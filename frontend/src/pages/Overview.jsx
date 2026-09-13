@@ -350,6 +350,14 @@ export default function Overview() {
               Open AI Agent
               <ChevronRight size={15} />
             </button>
+            <button
+              onClick={() => nav('/portal')}
+              className="flex items-center gap-2 px-6 py-4 rounded-lg border border-white/20
+                         text-dtxt text-15 font-bold hover:bg-white/[0.06] transition-colors"
+            >
+              Customer portal
+              <ChevronRight size={15} />
+            </button>
           </Reveal>
         </div>
       </section>

@@ -6,9 +6,24 @@ import Agent         from './pages/Agent'
 import Conversations from './pages/Conversations'
 import Evidence      from './pages/Evidence'
 import Analytics     from './pages/Analytics'
+import CustomerPortal from './pages/CustomerPortal'
+import AdminPortal from './pages/AdminPortal'
 
 export default function App() {
   const location = useLocation()
+  const isCustomerPortal = location.pathname === '/portal' || location.pathname === '/customer-portal'
+  const isAdminPortal = location.pathname === '/admin'
+
+  if (isCustomerPortal || isAdminPortal) {
+    return (
+      <Routes location={location} key={location.pathname}>
+        <Route path="/portal" element={<CustomerPortal />} />
+        <Route path="/customer-portal" element={<CustomerPortal />} />
+        <Route path="/admin" element={<AdminPortal />} />
+      </Routes>
+    )
+  }
+
   return (
     <div className="flex h-screen bg-void overflow-hidden">
       <Sidebar />
@@ -20,6 +35,8 @@ export default function App() {
             <Route path="/conversations" element={<Conversations />} />
             <Route path="/evidence"      element={<Evidence />} />
             <Route path="/analytics"     element={<Analytics />} />
+            <Route path="/portal"        element={<CustomerPortal />} />
+            <Route path="/customer-portal" element={<CustomerPortal />} />
           </Routes>
         </AnimatePresence>
       </main>

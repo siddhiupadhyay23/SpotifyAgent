@@ -66,9 +66,19 @@ def extract_platform(msg: str) -> str:
 # ── risk detection ────────────────────────────────────────────────
 _RISK_RULES = [
     ("billing_dispute",
-     re.compile(r"\b(unauthorized.?charg|chargeback|charge.?back|dispute|"
-                r"wrong.?charg|overcharg|charged.?twice|duplicate.?charg|"
+     re.compile(r"\b(chargeback|charge.?back|dispute|wrong.?charg(?:e|ed|ing|es)?|"
+                r"overcharg(?:e|ed|ing|es)?|charged.?twice|duplicate.?(?:charge|payment|transaction)s?|"
                 r"refund.?or|money.?back.+immediately)\b", re.I)),
+    ("suspicious_billing",
+     re.compile(r"\b(unauthori[sz]ed(?:\s+\w+){0,5}\s+(?:charge|transaction|payment|fee)s?|"
+                r"don'?t\s*recogni[sz]e\s*(?:this|the|a|my)?\s*(?:charge|transaction|payment|fee)s?|"
+                r"not\s*recogni[sz]e\s*(?:this|the|a|my)?\s*(?:charge|transaction|payment|fee)s?|"
+                r"unrecognized\s*(?:charge|transaction|payment|fee)s?|"
+                r"someone\s*charged\s*(?:my|the)?\s*(?:card|account)|"
+                r"someone\s+(?:else\s+)?used\s+(?:my|the)\s*(?:card|credit\s*card|debit\s*card)|"
+                r"fraud(?:ulent)?\s*(?:charge|transaction|payment|fee|activity)?|"
+                r"stolen\s*(?:card|credit\s*card|debit\s*card)|"
+                r"didn'?t\s*authorize\s*(?:this|the|a)?\s*(?:charge|payment)?)\b", re.I)),
     ("account_compromise",
      re.compile(r"\b(hack|hacked|compromis|unauthori[sz]|stolen|someone.?else|"
                 r"account.?stolen|not.?me|i.?didnt.?do)\b", re.I)),
@@ -100,7 +110,8 @@ _SYS_PROMPT = (
     "steps that are not present in the evidence. "
     "3. If evidence is insufficient, say so and ask the customer to DM. "
     "4. Keep reply under 3 sentences. Be empathetic and direct. "
-    "5. Do not repeat the customer's @handle."
+    "5. Do not repeat the customer's @handle, a historical customer's name, or "
+    "historical URLs (including t.co links)."
 )
 
 _FALLBACK = {
@@ -119,6 +130,38 @@ _DM_PAT   = re.compile(r"\b(dm|direct.?message)\b", re.I)
 _USEFUL   = re.compile(
     r"\b(try|restart|reset|clear.?cache|reinstall|update|check|verify|"
     r"enable|disable|log.?out|sign.?out|toggle|go.?to|navigate)\b", re.I)
+
+def _clean_response(resp: str) -> str:
+    """Remove historical identifiers from a reply while preserving support guidance."""
+    # 1. Remove @handles
+    clean = re.sub(r"@\S+\s*", "", resp).strip()
+
+    # 2. Remove historical short URLs, including Markdown links such as
+    #    "[https://t.co/example](https://t.co/example)".
+    short_url = r"https?://(?:t\.co|bit\.ly|tinyurl\.com|goo\.gl|ow\.ly)/[^\s\]\)]+"
+    clean = re.sub(rf"\[[^\]]*\]\({short_url}\)", "", clean, flags=re.I)
+    clean = re.sub(short_url, "", clean, flags=re.I)
+
+    # 3. Remove customer names in greetings (e.g. "Hey Peter!", "Hi Sarah,", "Hello John -")
+    clean = re.sub(
+        r"^(?:hey|hi|hello)\s+(?!there\b|everyone\b|all\b)[a-zA-Z0-9_\-\.']+\s*[,!:\-]*\s*",
+        "Hi! ",
+        clean,
+        flags=re.I
+    )
+    clean = re.sub(r"^Hi!\s+([a-z])", lambda m: f"Hi! {m.group(1).upper()}", clean)
+
+    # 4. Remove agent initials at end of message (e.g. /NG, ^SC, -JD, //AB)
+    clean = re.sub(r"\s*(?:/|\^|-|//)[A-Z]{2,4}\s*$", "", clean)
+
+    # 5. Clean whitespace and ensure proper ending punctuation
+    clean = re.sub(r"\s{2,}", " ", clean).strip()
+    if clean and clean[-1] not in ".!?":
+        clean += "."
+    if not clean.endswith("/SC"):
+        clean += " /SC"
+
+    return clean
 
 def generate_response(msg: str, intent: str, evidence: list) -> tuple[str, str]:
     """Returns (draft_reply, generation_mode)."""
@@ -139,7 +182,7 @@ def generate_response(msg: str, intent: str, evidence: list) -> tuple[str, str]:
                           {"role":"user",  "content":user_msg}],
                 temperature=0.3, max_tokens=200,
             )
-            return r.choices[0].message.content.strip(), f"llm:{LLM_MODEL}"
+            return _clean_response(r.choices[0].message.content), f"llm:{LLM_MODEL}"
         except Exception as e:
             return f"[LLM error: {e}]", "llm_error"
 
@@ -147,8 +190,8 @@ def generate_response(msg: str, intent: str, evidence: list) -> tuple[str, str]:
     for ev in evidence:
         resp = ev.get("brand_response","")
         if _USEFUL.search(resp) and not (_DM_PAT.search(resp) and len(resp) < 100):
-            clean = re.sub(r"@\S+\s*", "", resp).strip()
-            if len(clean) > 30:
+            clean = _clean_response(resp)
+            if len(clean) > 25:
                 return clean, "template_fallback:top_evidence"
 
     return _FALLBACK.get(intent,
@@ -164,7 +207,7 @@ def decide_escalation(intent: str, confidence: float,
     best_score = evidence[0]["score"] if evidence else 0.0
 
     # Rule 1: hard security / legal signals
-    hard_signals = {"billing_dispute","account_compromise","legal_threat"}
+    hard_signals = {"billing_dispute", "suspicious_billing", "account_compromise", "legal_threat"}
     hit = hard_signals & set(risk_signals)
     if hit:
         reasons.append(f"High-risk signal(s) detected: {', '.join(hit)}")
@@ -219,7 +262,7 @@ def run(message: str,
 
     # 6. Generation
     if esc["decision"] == "ESCALATE" and any(
-            s in risk_signals for s in ("billing_dispute","account_compromise","legal_threat")):
+            s in risk_signals for s in ("billing_dispute", "suspicious_billing", "account_compromise", "legal_threat")):
         draft = ("We understand this is urgent. Please DM us with your account "
                  "details and a specialist will assist you right away. /SC")
         gen_mode = "escalation_override"
