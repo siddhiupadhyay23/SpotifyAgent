@@ -5,7 +5,10 @@ Supports interactive customer conversations with SQLite persistence.
 Run: uvicorn api:app --reload --port 8000
 """
 
+import os
 import sys
+import hmac
+import sqlite3
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
 from contextlib import asynccontextmanager
@@ -13,7 +16,7 @@ from contextlib import asynccontextmanager
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
-from fastapi import FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, Header, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -33,13 +36,17 @@ app = FastAPI(
     description="Interactive customer support agent with SQLite persistence.",
     version="1.0.0",
     lifespan=lifespan,
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
 )
 
-# Enable CORS for local demo and frontend integration
+# Local browser origins only. Bearer tokens are sent explicitly, so cookies are
+# not needed and wildcard origins must not be used.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -48,41 +55,82 @@ app.add_middleware(
 # ── Request / Response Models ────────────────────────────────────────
 
 class PredictRequest(BaseModel):
-    message: str
+    message: str = Field(..., min_length=1, max_length=5000)
 
 
 class UserCreate(BaseModel):
-    name: str = Field(..., description="User full name or display name")
-    email: str = Field(..., description="User email address")
-    role: str = Field("customer", description="Role: 'customer' or 'agent'")
-    id: Optional[str] = Field(None, description="Optional custom user ID")
+    name: str = Field(..., min_length=1, max_length=120, pattern=r".*\S.*", description="User full name or display name")
+    email: str = Field(..., min_length=3, max_length=254, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$", description="User email address")
 
 
 class ConversationCreate(BaseModel):
-    user_id: str = Field(..., description="User ID associated with conversation")
-    status: str = Field("open", description="Conversation status (e.g. 'open', 'closed')")
-    id: Optional[str] = Field(None, description="Optional custom conversation ID")
+    user_id: str = Field(..., min_length=1, max_length=120, description="User ID associated with conversation")
+    status: Literal["open"] = Field("open", description="Customers may create open conversations")
+    id: Optional[str] = Field(None, min_length=1, max_length=120, description="Optional custom conversation ID")
 
 
 class MessageCreate(BaseModel):
-    content: Optional[str] = Field(None, description="Message text")
-    message: Optional[str] = Field(None, description="Alternative field for message text")
-    text: Optional[str] = Field(None, description="Alternative field for message text")
-    sender: str = Field("customer", description="Sender: 'customer' or 'agent'")
+    content: Optional[str] = Field(None, max_length=5000, description="Message text")
+    message: Optional[str] = Field(None, max_length=5000, description="Alternative field for message text")
+    text: Optional[str] = Field(None, max_length=5000, description="Alternative field for message text")
+    sender: str = Field("customer", description="Customers may only send customer messages")
 
 
 class AdminLoginRequest(BaseModel):
-    name: str = Field("Support Admin", description="Display name for the local demo admin")
-    email: str = Field("admin@spotifyagent.local", description="Email for the local demo admin")
-    id: str = Field("admin_demo", description="Stable local demo admin ID")
+    email: str = Field(..., min_length=3, max_length=254, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+    password: str = Field(..., min_length=1, max_length=256)
 
 
 class AdminMessageCreate(BaseModel):
-    content: str = Field(..., min_length=1, description="Human admin reply text")
+    content: str = Field(..., min_length=1, max_length=5000, description="Human admin reply text")
 
 
 class ConversationStatusUpdate(BaseModel):
     status: Literal["open", "escalated", "resolved"]
+
+
+def _bearer_token(authorization: Optional[str]) -> str:
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+    token = authorization.removeprefix("Bearer ").strip()
+    if not token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+    return token
+
+
+def get_current_user(authorization: Optional[str] = Header(None)) -> Dict[str, Any]:
+    user = db.get_session_user(_bearer_token(authorization))
+    if not user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired session")
+    return user
+
+
+def require_admin(current_user: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, Any]:
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
+    return current_user
+
+
+def _require_conversation_owner(conversation_id: str, current_user: Dict[str, Any]) -> Dict[str, Any]:
+    conversation = db.get_conversation(conversation_id)
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    if current_user["role"] != "admin" and conversation["user_id"] != current_user["id"]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Conversation access denied")
+    return conversation
+
+
+def _customer_conversation_view(conversation: Dict[str, Any]) -> Dict[str, Any]:
+    """Exclude internal agent decision details from customer API responses."""
+    return {
+        key: value for key, value in conversation.items()
+        if key not in {"agent_decisions"}
+    } | {
+        "messages": [
+            {key: value for key, value in message.items() if key != "decision"}
+            for message in conversation["messages"]
+        ]
+    }
 
 
 # ── Health & Diagnostics ─────────────────────────────────────────────
@@ -93,7 +141,6 @@ def health():
         "status": "ok",
         "service": "SpotifyCares Agent API",
         "database": "sqlite3",
-        "db_path": str(db.DB_PATH),
     }
 
 
@@ -101,11 +148,16 @@ def health():
 
 @app.post("/users", status_code=status.HTTP_201_CREATED)
 def create_user(req: UserCreate):
-    return db.create_user(name=req.name, email=req.email, role=req.role, user_id=req.id)
+    # Customer entry remains name/email based, but the server—not a client-supplied
+    # user ID—creates the identity and grants an opaque session token.
+    user = db.create_user(name=req.name.strip(), email=req.email.strip(), role="customer")
+    return {**user, "access_token": db.create_session(user["id"])}
 
 
 @app.get("/users/{user_id}")
-def get_user(user_id: str):
+def get_user(user_id: str, current_user: Dict[str, Any] = Depends(get_current_user)):
+    if current_user["role"] != "admin" and current_user["id"] != user_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User access denied")
     user = db.get_user(user_id)
     if not user:
         raise HTTPException(status_code=404, detail=f"User '{user_id}' not found")
@@ -113,8 +165,10 @@ def get_user(user_id: str):
 
 
 @app.get("/users/{user_id}/conversations")
-def get_user_conversations(user_id: str):
+def get_user_conversations(user_id: str, current_user: Dict[str, Any] = Depends(get_current_user)):
     """List the current user's conversations for the customer portal."""
+    if current_user["role"] != "admin" and current_user["id"] != user_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User access denied")
     user = db.get_user(user_id)
     if not user:
         raise HTTPException(status_code=404, detail=f"User '{user_id}' not found")
@@ -125,36 +179,47 @@ def get_user_conversations(user_id: str):
 
 @app.post("/admin/login")
 def admin_login(req: AdminLoginRequest):
-    """Create or return the local demo admin account.
-
-    This is intentionally a lightweight role-based demo entry point, not
-    production authentication.
-    """
-    return db.create_user(name=req.name, email=req.email, role="admin", user_id=req.id)
+    """Authenticate the configured local-demo admin and issue a bearer session."""
+    configured_email = os.getenv("SPOTIFY_AGENT_ADMIN_EMAIL", "").strip()
+    configured_password = os.getenv("SPOTIFY_AGENT_ADMIN_PASSWORD", "")
+    if not configured_email or not configured_password or not hmac.compare_digest(req.email.strip().lower(), configured_email.lower()) or not hmac.compare_digest(req.password, configured_password):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
+    user = db.create_user(name="Support Admin", email=configured_email, role="admin", user_id="admin_local_demo")
+    return {**user, "access_token": db.create_session(user["id"])}
 
 
 @app.get("/admin/conversations")
-def list_admin_conversations():
+def list_admin_conversations(_: Dict[str, Any] = Depends(require_admin)):
     return db.list_admin_conversations()
+
+
+@app.post("/auth/logout", status_code=status.HTTP_204_NO_CONTENT)
+def logout(authorization: Optional[str] = Header(None)):
+    db.revoke_session(_bearer_token(authorization))
 
 
 # ── Conversations Endpoints ──────────────────────────────────────────
 
 @app.post("/conversations", status_code=status.HTTP_201_CREATED)
-def create_conversation(req: ConversationCreate):
-    return db.create_conversation(user_id=req.user_id, status=req.status, conversation_id=req.id)
+def create_conversation(req: ConversationCreate, current_user: Dict[str, Any] = Depends(get_current_user)):
+    if current_user["role"] != "customer" or req.user_id != current_user["id"]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Customers may only create their own conversations")
+    if req.status != "open":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Customers may only create open conversations")
+    try:
+        return db.create_conversation(user_id=req.user_id, status="open", conversation_id=req.id)
+    except sqlite3.IntegrityError:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Conversation ID already exists")
 
 
 @app.get("/conversations/{conversation_id}")
-def get_conversation(conversation_id: str):
-    conv = db.get_conversation(conversation_id)
-    if not conv:
-        raise HTTPException(status_code=404, detail=f"Conversation '{conversation_id}' not found")
-    return conv
+def get_conversation(conversation_id: str, current_user: Dict[str, Any] = Depends(get_current_user)):
+    conv = _require_conversation_owner(conversation_id, current_user)
+    return conv if current_user["role"] == "admin" else _customer_conversation_view(conv)
 
 
 @app.post("/conversations/{conversation_id}/admin-messages", status_code=status.HTTP_201_CREATED)
-def send_admin_message(conversation_id: str, req: AdminMessageCreate):
+def send_admin_message(conversation_id: str, req: AdminMessageCreate, _: Dict[str, Any] = Depends(require_admin)):
     """Persist a human reply without invoking the AI pipeline."""
     conv = db.get_conversation(conversation_id)
     if not conv:
@@ -166,7 +231,7 @@ def send_admin_message(conversation_id: str, req: AdminMessageCreate):
 
 
 @app.patch("/conversations/{conversation_id}/status")
-def update_conversation_status(conversation_id: str, req: ConversationStatusUpdate):
+def update_conversation_status(conversation_id: str, req: ConversationStatusUpdate, _: Dict[str, Any] = Depends(require_admin)):
     conversation = db.update_conversation_status(conversation_id, req.status)
     if not conversation:
         raise HTTPException(status_code=404, detail=f"Conversation '{conversation_id}' not found")
@@ -176,19 +241,21 @@ def update_conversation_status(conversation_id: str, req: ConversationStatusUpda
 # ── Messages & Agent Execution ───────────────────────────────────────
 
 @app.post("/conversations/{conversation_id}/messages")
-def send_message(conversation_id: str, req: MessageCreate):
+def send_message(conversation_id: str, req: MessageCreate, current_user: Dict[str, Any] = Depends(get_current_user)):
     msg_text = (req.content or req.message or req.text or "").strip()
     if not msg_text:
         raise HTTPException(status_code=422, detail="Message content cannot be empty")
 
-    conv = db.get_conversation(conversation_id)
-    if not conv:
-        raise HTTPException(status_code=404, detail=f"Conversation '{conversation_id}' not found")
+    if req.sender != "customer":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Customers may only send customer messages")
+    if current_user["role"] != "customer":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Customer access required")
+    _require_conversation_owner(conversation_id, current_user)
 
     # 1. Save customer message
     cust_msg = db.add_message(
         conversation_id=conversation_id,
-        sender=req.sender,
+        sender="customer",
         content=msg_text,
     )
 
@@ -241,7 +308,7 @@ def send_message(conversation_id: str, req: MessageCreate):
         db.update_conversation_status(conversation_id, "escalated")
 
     # 5. Return complete agent result
-    return {
+    response = {
         "conversation_id": conversation_id,
         "customer_message_id": cust_msg["id"],
         "agent_message_id": agent_msg["id"],
@@ -261,12 +328,15 @@ def send_message(conversation_id: str, req: MessageCreate):
         "retrieved_evidence": evidence,
         "agent_decision_id": decision_record["id"],
     }
+    # Customer clients only need the generated response. Decision rationale and
+    # retrieval evidence remain visible to an authenticated admin via detail.
+    return {key: response[key] for key in ("conversation_id", "customer_message_id", "agent_message_id", "response", "draft_reply")}
 
 
 # ── Backward-compatible /predict endpoint ────────────────────────────
 
 @app.post("/predict")
-def predict(req: PredictRequest):
+def predict(req: PredictRequest, _: Dict[str, Any] = Depends(require_admin)):
     result = agent_run(req.message)
     evidence = [
         {

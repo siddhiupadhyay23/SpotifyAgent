@@ -12,6 +12,8 @@ import os
 import json
 import sqlite3
 import uuid
+import hashlib
+import secrets
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -75,9 +77,18 @@ def init_db():
                 FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE
             );
 
+            CREATE TABLE IF NOT EXISTS auth_sessions (
+                token_hash TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            );
+
             CREATE INDEX IF NOT EXISTS idx_conversations_user ON conversations(user_id);
             CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id);
             CREATE INDEX IF NOT EXISTS idx_decisions_message ON agent_decisions(message_id);
+            CREATE INDEX IF NOT EXISTS idx_auth_sessions_user ON auth_sessions(user_id);
             """)
     finally:
         conn.close()
@@ -122,6 +133,58 @@ def ensure_user(user_id: str, name: Optional[str] = None, email: Optional[str] =
     u_name = name or f"User {user_id}"
     u_email = email or f"{user_id}@example.com"
     return create_user(name=u_name, email=u_email, user_id=user_id)
+
+
+# ── Local demo sessions ─────────────────────────────────────────────
+
+def _token_hash(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def create_session(user_id: str, ttl_hours: int = 8) -> str:
+    """Issue an opaque bearer token while storing only its SHA-256 hash."""
+    from datetime import timedelta
+
+    token = secrets.token_urlsafe(32)
+    now = datetime.now(timezone.utc)
+    expires_at = now + timedelta(hours=ttl_hours)
+    conn = get_db_connection()
+    try:
+        with conn:
+            conn.execute("DELETE FROM auth_sessions WHERE expires_at <= ?", (now.isoformat(),))
+            conn.execute(
+                "INSERT INTO auth_sessions (token_hash, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)",
+                (_token_hash(token), user_id, expires_at.isoformat(), now.isoformat()),
+            )
+        return token
+    finally:
+        conn.close()
+
+
+def get_session_user(token: str) -> Optional[Dict[str, Any]]:
+    conn = get_db_connection()
+    try:
+        row = conn.execute(
+            """
+            SELECT u.id, u.name, u.email, u.role
+            FROM auth_sessions AS s
+            JOIN users AS u ON u.id = s.user_id
+            WHERE s.token_hash = ? AND s.expires_at > ?
+            """,
+            (_token_hash(token), utc_now_iso()),
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def revoke_session(token: str) -> None:
+    conn = get_db_connection()
+    try:
+        with conn:
+            conn.execute("DELETE FROM auth_sessions WHERE token_hash = ?", (_token_hash(token),))
+    finally:
+        conn.close()
 
 
 # ── Conversations ────────────────────────────────────────────────────

@@ -3,6 +3,7 @@ Test script for Phase 1: Real Backend + SQLite.
 Tests all endpoints and verifies persistence in SQLite for arbitrary customer messages.
 """
 import sys
+import os
 import json
 import sqlite3
 from pathlib import Path
@@ -15,6 +16,9 @@ if hasattr(sys.stdout, "reconfigure"):
 
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
+
+os.environ.setdefault("SPOTIFY_AGENT_ADMIN_EMAIL", "admin-test@spotifyagent.local")
+os.environ.setdefault("SPOTIFY_AGENT_ADMIN_PASSWORD", "local-test-admin-password")
 
 from fastapi.testclient import TestClient
 from api import app
@@ -44,6 +48,7 @@ def run_tests():
     assert user_res.status_code == 201, f"User creation failed: {user_res.status_code} {user_res.text}"
     user = user_res.json()
     user_id = user["id"]
+    customer_headers = {"Authorization": f"Bearer {user['access_token']}"}
     print(f"\n[2/7] POST /users -> Created user ID: {user_id}")
     print(f"      Data: {user}")
 
@@ -52,7 +57,7 @@ def run_tests():
         "user_id": user_id,
         "status": "open",
     }
-    conv_res = client.post("/conversations", json=conv_payload)
+    conv_res = client.post("/conversations", json=conv_payload, headers=customer_headers)
     assert conv_res.status_code == 201, f"Conv creation failed: {conv_res.status_code} {conv_res.text}"
     conv = conv_res.json()
     conv_id = conv["id"]
@@ -81,24 +86,21 @@ def run_tests():
     print("\n[4/7] POST /conversations/{conversation_id}/messages (Processing 3 Test Messages)")
     for i, item in enumerate(test_messages, 1):
         payload = {"content": item["text"]}
-        msg_res = client.post(f"/conversations/{conv_id}/messages", json=payload)
+        msg_res = client.post(f"/conversations/{conv_id}/messages", json=payload, headers=customer_headers)
         assert msg_res.status_code == 200, f"Message {i} failed: {msg_res.status_code} {msg_res.text}"
         data = msg_res.json()
 
         print(f"\n  -- Message {i}: {item['category']} --")
-        print(f"  Customer Message  : \"{data['message']}\"")
-        print(f"  Classified Intent : {data['intent']} (Confidence: {data['confidence']:.2%})")
-        print(f"  Platform Detected : {data['platform']}")
-        print(f"  Escalation Policy : {data['decision']}")
-        print(f"  Escalation Reason : {data['escalation_reason']}")
+        print(f"  Customer Message  : \"{item['text']}\"")
         print(f"  Agent Response    : \"{data['response']}\"")
-        print(f"  Evidence Count    : {len(data.get('retrieved_evidence', []))} pairs retrieved")
         print(f"  Saved Message IDs : Customer={data['customer_message_id']}, Agent={data['agent_message_id']}")
-        print(f"  Decision DB ID    : {data['agent_decision_id']}")
 
     # 5. Retrieve Conversation Details
     print(f"\n[5/7] GET /conversations/{conv_id}")
-    get_conv = client.get(f"/conversations/{conv_id}")
+    admin_login = client.post("/admin/login", json={"email": os.environ["SPOTIFY_AGENT_ADMIN_EMAIL"], "password": os.environ["SPOTIFY_AGENT_ADMIN_PASSWORD"]})
+    assert admin_login.status_code == 200, admin_login.text
+    admin_headers = {"Authorization": f"Bearer {admin_login.json()['access_token']}"}
+    get_conv = client.get(f"/conversations/{conv_id}", headers=admin_headers)
     assert get_conv.status_code == 200, f"Get conv failed: {get_conv.status_code}"
     c_data = get_conv.json()
     print(f"      Conversation status : {c_data['status']}")
@@ -137,7 +139,7 @@ def run_tests():
 
     # 7. Backward compatibility check
     print("\n[7/8] Backward Compatibility Check (POST /predict)")
-    pred_res = client.post("/predict", json={"message": "Cannot download playlists for offline listening on iOS"})
+    pred_res = client.post("/predict", json={"message": "Cannot download playlists for offline listening on iOS"}, headers=admin_headers)
     assert pred_res.status_code == 200
     pred_data = pred_res.json()
     print(f"      Intent: {pred_data['intent']} | Platform: {pred_data['platform']} | Decision: {pred_data['decision']}")
@@ -153,9 +155,9 @@ def run_tests():
     ]
 
     for code, text in safety_cases:
-        m_res = client.post(f"/conversations/{conv_id}/messages", json={"content": text})
+        m_res = client.post(f"/conversations/{conv_id}/messages", json={"content": text}, headers=customer_headers)
         assert m_res.status_code == 200, f"Case {code} failed: {m_res.status_code}"
-        d = m_res.json()
+        d = client.get(f"/conversations/{conv_id}", headers=admin_headers).json()["agent_decisions"][-1]
         print(f"\n  Case {code}) \"{text}\"")
         print(f"    Intent    : {d['intent']}")
         print(f"    Confidence: {d['confidence']:.4f}")

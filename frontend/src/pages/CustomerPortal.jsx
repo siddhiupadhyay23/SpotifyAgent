@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
   ArrowLeft, Bot, CheckCircle2, CircleHelp, Clock3, Loader2,
@@ -92,14 +92,13 @@ function CustomerLogin({ onContinue }) {
     if (!cleanName || !cleanEmail || submitting) return
     setSubmitting(true); setError('')
     try {
-      const suffix = globalThis.crypto?.randomUUID?.().replaceAll('-', '') || `${Date.now()}${Math.random().toString(16).slice(2)}`
-      const user = await api('/users', { method: 'POST', body: JSON.stringify({ id: `portal_${suffix}`, name: cleanName, email: cleanEmail, role: 'customer' }) })
+      const user = await api('/users', { method: 'POST', body: JSON.stringify({ name: cleanName, email: cleanEmail }) })
       window.localStorage.setItem(CUSTOMER_SESSION_KEY, JSON.stringify(user))
       onContinue(user)
     } catch (err) { setError(`Unable to start your support session: ${err.message}`) } finally { setSubmitting(false) }
   }
 
-  return <div className="min-h-screen bg-canvas px-5 py-12"><div className="mx-auto max-w-md rounded-2xl border border-rule bg-white p-7 shadow-lift"><div className="mb-6 flex items-center gap-2"><div className="flex h-9 w-9 items-center justify-center rounded-xl bg-green-600 text-white"><Sparkles size={17} /></div><div><p className="text-17 font-bold tracking-tight">Spotify Support</p><p className="text-11 text-ink3">Start your private support session</p></div></div><form onSubmit={submit} className="space-y-4"><div><label htmlFor="customer-name" className="mb-1.5 block text-12 font-semibold text-ink">Your name</label><input id="customer-name" value={name} onChange={event => setName(event.target.value)} autoComplete="name" required className="w-full rounded-lg border border-rule px-3 py-2.5 text-14 outline-none focus:border-green-600 focus:ring-2 focus:ring-green-600/15" placeholder="Jane Doe" /></div><div><label htmlFor="customer-email" className="mb-1.5 block text-12 font-semibold text-ink">Email address</label><input id="customer-email" value={email} onChange={event => setEmail(event.target.value)} autoComplete="email" type="email" required className="w-full rounded-lg border border-rule px-3 py-2.5 text-14 outline-none focus:border-green-600 focus:ring-2 focus:ring-green-600/15" placeholder="jane@example.com" /></div>{error && <p role="alert" className="rounded-lg bg-stop-bg px-3 py-2 text-12 text-stop-text">{error}</p>}<button type="submit" disabled={!name.trim() || !email.trim() || submitting} className="flex w-full items-center justify-center gap-2 rounded-lg bg-go px-4 py-3 text-13 font-semibold text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50">{submitting && <Loader2 className="animate-spin" size={14} />} Continue to support</button></form></div></div>
+  return <div className="min-h-screen bg-canvas px-5 py-12"><div className="mx-auto max-w-md rounded-2xl border border-rule bg-white p-7 shadow-lift"><Link to="/" className="mb-6 inline-flex items-center gap-1.5 text-12 font-semibold text-ink3 hover:text-ink"><ArrowLeft size={14} /> Back to role selection</Link><div className="mb-6 flex items-center gap-2"><div className="flex h-9 w-9 items-center justify-center rounded-xl bg-green-600 text-white"><Sparkles size={17} /></div><div><p className="text-17 font-bold tracking-tight">Spotify Support</p><p className="text-11 text-ink3">Start your private support session</p></div></div><form onSubmit={submit} className="space-y-4"><div><label htmlFor="customer-name" className="mb-1.5 block text-12 font-semibold text-ink">Your name</label><input id="customer-name" value={name} onChange={event => setName(event.target.value)} autoComplete="name" required className="w-full rounded-lg border border-rule px-3 py-2.5 text-14 outline-none focus:border-green-600 focus:ring-2 focus:ring-green-600/15" placeholder="Jane Doe" /></div><div><label htmlFor="customer-email" className="mb-1.5 block text-12 font-semibold text-ink">Email address</label><input id="customer-email" value={email} onChange={event => setEmail(event.target.value)} autoComplete="email" type="email" required className="w-full rounded-lg border border-rule px-3 py-2.5 text-14 outline-none focus:border-green-600 focus:ring-2 focus:ring-green-600/15" placeholder="jane@example.com" /></div>{error && <p role="alert" className="rounded-lg bg-stop-bg px-3 py-2 text-12 text-stop-text">{error}</p>}<button type="submit" disabled={!name.trim() || !email.trim() || submitting} className="flex w-full items-center justify-center gap-2 rounded-lg bg-go px-4 py-3 text-13 font-semibold text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50">{submitting && <Loader2 className="animate-spin" size={14} />} Continue to support</button></form></div></div>
 }
 
 function EmptyState({ onNew }) {
@@ -118,8 +117,12 @@ function EmptyState({ onNew }) {
 }
 
 export default function CustomerPortal() {
+  const navigate = useNavigate()
   const [user, setUser] = useState(() => {
-    try { return JSON.parse(window.localStorage.getItem(CUSTOMER_SESSION_KEY) || 'null') } catch { return null }
+    try {
+      const saved = JSON.parse(window.localStorage.getItem(CUSTOMER_SESSION_KEY) || 'null')
+      return saved?.access_token ? saved : null
+    } catch { return null }
   })
   const [conversations, setConversations] = useState([])
   const [active, setActive] = useState(null)
@@ -128,37 +131,32 @@ export default function CustomerPortal() {
   const [sending, setSending] = useState(false)
   const [error, setError] = useState('')
   const messagesEndRef = useRef(null)
+  const authHeaders = user?.access_token ? { Authorization: `Bearer ${user.access_token}` } : {}
 
   const refreshConversations = useCallback(async () => {
     if (!user) return []
-    const list = await api(`/users/${encodeURIComponent(user.id)}/conversations`)
+    const list = await api(`/users/${encodeURIComponent(user.id)}/conversations`, { headers: authHeaders })
     setConversations(list)
     return list
-  }, [user])
+  }, [authHeaders.Authorization, user])
 
   const selectConversation = useCallback(async (conversationId) => {
     setError('')
     try {
-      const conversation = await api(`/conversations/${encodeURIComponent(conversationId)}`)
+      const conversation = await api(`/conversations/${encodeURIComponent(conversationId)}`, { headers: authHeaders })
       setActive(conversation)
     } catch (err) {
       setError(err.message)
     }
-  }, [])
+  }, [authHeaders.Authorization])
 
   useEffect(() => {
     let cancelled = false
     if (!user) { setLoading(false); return undefined }
     async function initialise() {
       try {
-        let loadedUser
-        try {
-          loadedUser = await api(`/users/${encodeURIComponent(user.id)}`)
-        } catch (err) {
-          if (!err.message.includes('not found')) throw err
-          loadedUser = await api('/users', { method: 'POST', body: JSON.stringify(user) })
-        }
-        const list = await api(`/users/${encodeURIComponent(user.id)}/conversations`)
+        const loadedUser = await api(`/users/${encodeURIComponent(user.id)}`, { headers: authHeaders })
+        const list = await api(`/users/${encodeURIComponent(user.id)}/conversations`, { headers: authHeaders })
         if (cancelled) return
         setUser(current => current?.id === loadedUser.id ? current : loadedUser)
         setConversations(list)
@@ -171,7 +169,7 @@ export default function CustomerPortal() {
     }
     initialise()
     return () => { cancelled = true }
-  }, [selectConversation, user?.id])
+  }, [authHeaders.Authorization, selectConversation, user?.id])
 
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [active?.messages?.length])
 
@@ -180,6 +178,7 @@ export default function CustomerPortal() {
     try {
       const conversation = await api('/conversations', {
         method: 'POST',
+        headers: authHeaders,
         body: JSON.stringify({ user_id: user.id, status: 'open' }),
       })
       setConversations(current => [conversation, ...current])
@@ -191,8 +190,10 @@ export default function CustomerPortal() {
   }
 
   function switchCustomer() {
+    if (user?.access_token) void api('/auth/logout', { method: 'POST', headers: authHeaders }).catch(() => {})
     window.localStorage.removeItem(CUSTOMER_SESSION_KEY)
     setUser(null); setConversations([]); setActive(null); setError(''); setDraft('')
+    navigate('/')
   }
 
   if (!user) return <CustomerLogin onContinue={setUser} />
@@ -206,11 +207,12 @@ export default function CustomerPortal() {
     try {
       await api(`/conversations/${encodeURIComponent(active.id)}/messages`, {
         method: 'POST',
+        headers: authHeaders,
         body: JSON.stringify({ content, sender: 'customer' }),
       })
       setDraft('')
       const [conversation, list] = await Promise.all([
-        api(`/conversations/${encodeURIComponent(active.id)}`),
+        api(`/conversations/${encodeURIComponent(active.id)}`, { headers: authHeaders }),
         refreshConversations(),
       ])
       setActive(conversation)
@@ -227,7 +229,7 @@ export default function CustomerPortal() {
       <header className="border-b border-rule bg-white">
         <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-5">
           <Link to="/" className="flex items-center gap-2 text-13 font-semibold text-ink3 transition hover:text-ink">
-            <ArrowLeft size={15} /> Support home
+            <ArrowLeft size={15} /> Role selection
           </Link>
           <div className="flex items-center gap-2">
             <div className="flex h-8 w-8 items-center justify-center rounded-full bg-green-600 text-white"><Sparkles size={15} /></div>
@@ -242,7 +244,7 @@ export default function CustomerPortal() {
 
       <main className="mx-auto grid min-h-[calc(100vh-64px)] max-w-6xl grid-cols-1 bg-white shadow-card lg:grid-cols-[292px_1fr]">
         <aside className="border-b border-rule bg-[#fbfbfa] p-4 lg:border-b-0 lg:border-r">
-          <div className="mb-4 flex items-center justify-between"><div><h1 className="text-17 font-bold tracking-tight">Your conversations</h1><button onClick={switchCustomer} className="mt-0.5 text-11 text-ink3 underline-offset-2 hover:text-ink hover:underline">Use a different customer</button></div><button onClick={startConversation} aria-label="New support request" className="rounded-lg bg-go p-2 text-white transition hover:bg-green-700"><Plus size={16} /></button></div>
+          <div className="mb-4 flex items-center justify-between"><div><h1 className="text-17 font-bold tracking-tight">Your conversations</h1><button onClick={switchCustomer} className="mt-0.5 text-11 text-ink3 underline-offset-2 hover:text-ink hover:underline">Log out</button></div><button onClick={startConversation} aria-label="New support request" className="rounded-lg bg-go p-2 text-white transition hover:bg-green-700"><Plus size={16} /></button></div>
           <div className="flex gap-2 overflow-x-auto pb-1 lg:block lg:space-y-2 lg:overflow-visible">
             {loading ? <p className="p-3 text-12 text-ink3">Loading conversations…</p> : conversations.length ? conversations.map(conversation => <div className="min-w-[230px] lg:min-w-0" key={conversation.id}><ConversationRow conversation={conversation} selected={active?.id === conversation.id} onClick={() => selectConversation(conversation.id)} /></div>) : <p className="p-3 text-12 text-ink3">No conversations yet.</p>}
           </div>
